@@ -1,10 +1,39 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Loader2, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { GameCard } from "@/components/GameCard";
-import { GAMES, SPORTS, LEVELS, CITIES, type Sport, type Level } from "@/data/games";
+import { SPORTS, LEVELS, CITIES, type Sport, type Level } from "@/data/games";
+import { listGames } from "@/lib/queries";
+
+const WHENS = ["Todos", "Hoje", "Amanhã", "Esta semana"] as const;
+type When = (typeof WHENS)[number];
+
+type ExplorarSearch = {
+  q?: string;
+  city?: string;
+  when?: When;
+  sport?: Sport;
+  level?: Level;
+  maxPrice?: number;
+};
 
 export const Route = createFileRoute("/explorar")({
+  validateSearch: (search: Record<string, unknown>): ExplorarSearch => {
+    const out: ExplorarSearch = {};
+    const q = search["q"];
+    if (typeof q === "string" && q.trim()) out.q = q.slice(0, 60);
+    if (CITIES.includes(search["city"] as string)) out.city = search["city"] as string;
+    if (WHENS.includes(search["when"] as When)) out.when = search["when"] as When;
+    if (SPORTS.includes(search["sport"] as Sport)) out.sport = search["sport"] as Sport;
+    if (LEVELS.includes(search["level"] as Level)) out.level = search["level"] as Level;
+    const price = search["maxPrice"];
+    if (price !== undefined && Number.isFinite(Number(price))) {
+      out.maxPrice = Math.min(Math.max(Number(price), 0), 50);
+    }
+    return out;
+  },
   head: () => ({
     meta: [
       { title: "Explorar jogos — MatchFind" },
@@ -24,27 +53,49 @@ export const Route = createFileRoute("/explorar")({
   component: Explorar,
 });
 
-const DAYS = ["Todos", "Hoje", "Amanhã", "Domingo", "Segunda"];
-
 function Explorar() {
-  const [sport, setSport] = useState<Sport | "Todas">("Todas");
-  const [day, setDay] = useState("Todos");
-  const [city, setCity] = useState("Todas");
-  const [level, setLevel] = useState<Level | "Todos">("Todos");
-  const [maxPrice, setMaxPrice] = useState(20);
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: "/explorar" });
 
-  const results = useMemo(
-    () =>
-      GAMES.filter(
-        (g) =>
-          (sport === "Todas" || g.sport === sport) &&
-          (day === "Todos" || g.dayLabel === day) &&
-          (city === "Todas" || g.city === city) &&
-          (level === "Todos" || g.level === level) &&
-          g.price <= maxPrice,
-      ),
-    [sport, day, city, level, maxPrice],
-  );
+  const maxPrice = search.maxPrice ?? 50;
+  const [term, setTerm] = useState(search.q ?? "");
+
+  // Um valor undefined no patch significa "tirar este filtro" — as chaves
+  // vazias são removidas para não ficarem no endereço da página.
+  const setFilter = (patch: { [K in keyof ExplorarSearch]?: ExplorarSearch[K] | undefined }) =>
+    navigate({
+      search: (prev) => {
+        const merged: Record<string, unknown> = { ...prev, ...patch };
+        for (const key of Object.keys(merged)) {
+          if (merged[key] === undefined) delete merged[key];
+        }
+        return merged as ExplorarSearch;
+      },
+      replace: true,
+    });
+
+  // Espera 400ms depois da última tecla antes de procurar, para não
+  // disparar um pedido à base de dados por cada letra escrita.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const next = term.trim() || undefined;
+      if (next !== search.q) setFilter({ q: next });
+    }, 400);
+    return () => clearTimeout(id);
+  }, [term]);
+
+  const { data: results = [], isLoading } = useQuery({
+    queryKey: ["games", "explorar", search],
+    queryFn: () =>
+      listGames({
+        search: search.q,
+        city: search.city,
+        when: search.when,
+        sport: search.sport,
+        level: search.level,
+        maxPrice: search.maxPrice,
+      }),
+  });
 
   const selectClass =
     "rounded-2xl bg-glass px-3 py-2.5 text-sm ring-1 ring-border backdrop-blur-md outline-none";
@@ -59,31 +110,56 @@ function Explorar() {
           </p>
         </header>
 
+        <div className="flex items-center gap-2.5 rounded-full bg-glass px-4 py-3 ring-1 ring-border backdrop-blur-md">
+          <Search className="size-4 text-muted-foreground" />
+          <input
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            placeholder="Local, clube ou nome do jogo…"
+            className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+
         <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
-          {(["Todas", ...SPORTS] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setSport(s)}
-              className={`shrink-0 rounded-full px-4 py-2 text-sm transition-transform duration-150 active:scale-[0.94] ${
-                sport === s
-                  ? "bg-primary font-semibold text-primary-foreground"
-                  : "bg-glass font-medium text-foreground ring-1 ring-border backdrop-blur-md"
-              }`}
-            >
-              {s}
-            </button>
-          ))}
+          {(["Todas", ...SPORTS] as const).map((s) => {
+            const active = s === "Todas" ? !search.sport : search.sport === s;
+            return (
+              <button
+                key={s}
+                onClick={() => setFilter({ sport: s === "Todas" ? undefined : s })}
+                className={`shrink-0 rounded-full px-4 py-2 text-sm transition-transform duration-150 active:scale-[0.94] ${
+                  active
+                    ? "bg-primary font-semibold text-primary-foreground"
+                    : "bg-glass font-medium text-foreground ring-1 ring-border backdrop-blur-md"
+                }`}
+              >
+                {s}
+              </button>
+            );
+          })}
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          <select value={day} onChange={(e) => setDay(e.target.value)} className={selectClass}>
-            {DAYS.map((d) => (
+          <select
+            value={search.when ?? "Todos"}
+            onChange={(e) =>
+              setFilter({ when: e.target.value === "Todos" ? undefined : (e.target.value as When) })
+            }
+            className={selectClass}
+          >
+            {WHENS.map((d) => (
               <option key={d} className="bg-background">
                 {d}
               </option>
             ))}
           </select>
-          <select value={city} onChange={(e) => setCity(e.target.value)} className={selectClass}>
+          <select
+            value={search.city ?? "Todas"}
+            onChange={(e) =>
+              setFilter({ city: e.target.value === "Todas" ? undefined : e.target.value })
+            }
+            className={selectClass}
+          >
             {["Todas", ...CITIES].map((c) => (
               <option key={c} className="bg-background">
                 {c}
@@ -91,8 +167,12 @@ function Explorar() {
             ))}
           </select>
           <select
-            value={level}
-            onChange={(e) => setLevel(e.target.value as Level | "Todos")}
+            value={search.level ?? "Todos"}
+            onChange={(e) =>
+              setFilter({
+                level: e.target.value === "Todos" ? undefined : (e.target.value as Level),
+              })
+            }
             className={selectClass}
           >
             {["Todos", ...LEVELS].map((l) => (
@@ -108,32 +188,48 @@ function Explorar() {
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
               Preço máximo
             </span>
-            <span className="font-mono text-xs">{maxPrice === 0 ? "Grátis" : `${maxPrice}€`}</span>
+            <span className="font-mono text-xs">
+              {maxPrice === 0 ? "Grátis" : maxPrice >= 50 ? "Qualquer" : `${maxPrice}€`}
+            </span>
           </div>
           <input
             type="range"
             min={0}
-            max={20}
+            max={50}
+            step={1}
             value={maxPrice}
-            onChange={(e) => setMaxPrice(Number(e.target.value))}
+            onChange={(e) =>
+              setFilter({
+                maxPrice: Number(e.target.value) >= 50 ? undefined : Number(e.target.value),
+              })
+            }
             className="mt-3 w-full accent-[var(--primary)]"
           />
         </div>
 
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          {results.length} {results.length === 1 ? "jogo" : "jogos"}
+          {isLoading ? "a procurar…" : `${results.length} ${results.length === 1 ? "jogo" : "jogos"}`}
         </p>
 
         <div className="space-y-3">
-          {results.map((g, i) => (
-            <GameCard key={g.id} game={g} delay={i * 60} />
-          ))}
-          {results.length === 0 && (
+          {isLoading && (
+            <div className="grid place-items-center rounded-2xl bg-glass p-8 ring-1 ring-border">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {!isLoading && results.map((g, i) => <GameCard key={g.id} game={g} delay={i * 60} />)}
+          {!isLoading && results.length === 0 && (
             <div className="rounded-3xl bg-glass p-6 text-center ring-1 ring-border backdrop-blur-md">
               <p className="font-display text-base font-bold">Sem jogos com estes filtros</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 Alarga a data, o nível ou o preço para veres mais opções.
               </p>
+              <Link
+                to="/criar"
+                className="mt-4 inline-block rounded-full bg-primary px-5 py-2.5 font-display text-sm font-bold text-primary-foreground"
+              >
+                Criar um jogo
+              </Link>
             </div>
           )}
         </div>

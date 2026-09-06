@@ -1,60 +1,98 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { useState } from "react";
-import { ArrowLeft, CalendarDays, Clock, MapPin, Star } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, CalendarDays, Clock, Loader2, MapPin, Tag, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { BottomNav } from "@/components/BottomNav";
-import { getGame, formatPrice } from "@/data/games";
+import { formatPrice } from "@/data/games";
+import { countGamesOrganized, deleteGame, getGameDetail, joinGame, leaveGame } from "@/lib/queries";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/jogo/$id")({
-  loader: ({ params }) => {
-    const game = getGame(params.id);
-    if (!game) throw notFound();
-    return { game };
-  },
-  head: ({ loaderData }) => {
-    if (!loaderData) {
-      return {
-        meta: [{ title: "Jogo indisponível — MatchFind" }, { name: "robots", content: "noindex" }],
-      };
-    }
-    const { game } = loaderData;
-    const title = `${game.title} · ${game.venue} — MatchFind`;
-    const description = `${game.sport} em ${game.city}, ${game.dayLabel} às ${game.time}. ${formatPrice(game.price)}.`;
-    return {
-      meta: [
-        { title },
-        { name: "description", content: description },
-        { property: "og:title", content: title },
-        { property: "og:description", content: description },
-        { property: "og:type", content: "article" },
-        { name: "twitter:card", content: "summary_large_image" },
-      ],
-    };
-  },
-  errorComponent: () => <Fallback text="Não conseguimos carregar este jogo." />,
-  notFoundComponent: () => <Fallback text="Este jogo já não existe." />,
+  head: () => ({
+    meta: [
+      { title: "Jogo — MatchFind" },
+      { name: "description", content: "Detalhes do jogo, jogadores inscritos e vagas disponíveis." },
+      { property: "og:type", content: "article" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: GameDetail,
 });
 
-function Fallback({ text }: { text: string }) {
-  return (
-    <div className="grid min-h-screen place-items-center bg-background px-6 text-center">
-      <div>
-        <p className="font-display text-xl font-bold">{text}</p>
-        <Link
-          to="/explorar"
-          className="mt-4 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
-        >
-          Ver outros jogos
-        </Link>
-      </div>
-    </div>
-  );
-}
-
 function GameDetail() {
-  const { game } = Route.useLoaderData();
-  const [joined, setJoined] = useState(false);
-  const free = game.slots - game.players.length - (joined ? 1 : 0);
+  const { id } = Route.useParams();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const { data: game, isLoading } = useQuery({
+    queryKey: ["game", id],
+    queryFn: () => getGameDetail(id),
+  });
+
+  const { data: organizerGames } = useQuery({
+    queryKey: ["organizer-count", game?.organizer.id],
+    queryFn: () => countGamesOrganized(game!.organizer.id),
+    enabled: Boolean(game?.organizer.id),
+  });
+
+  const joined = Boolean(user && game?.players.some((p) => p.id === user.id));
+  const isOrganizer = Boolean(user && game && game.organizer.id === user.id);
+  const free = game ? game.slots - game.taken : 0;
+  const isPast = game ? game.startsAt.getTime() < Date.now() : false;
+
+  const membership = useMutation({
+    mutationFn: async () => {
+      if (!user || !game) return;
+      if (joined) await leaveGame(game.id, user.id);
+      else await joinGame(game.id, user.id);
+    },
+    onSuccess: () => {
+      toast.success(joined ? "Saíste do jogo." : "Estás inscrito!");
+      queryClient.invalidateQueries({ queryKey: ["game", id] });
+      queryClient.invalidateQueries({ queryKey: ["games"] });
+      queryClient.invalidateQueries({ queryKey: ["my-games"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message);
+      queryClient.invalidateQueries({ queryKey: ["game", id] });
+    },
+  });
+
+  const removal = useMutation({
+    mutationFn: () => deleteGame(id),
+    onSuccess: () => {
+      toast.success("Jogo cancelado.");
+      queryClient.invalidateQueries({ queryKey: ["games"] });
+      queryClient.invalidateQueries({ queryKey: ["my-games"] });
+      navigate({ to: "/explorar" });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!game) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-background px-6 text-center">
+        <div>
+          <p className="font-display text-xl font-bold">Este jogo já não existe.</p>
+          <Link
+            to="/explorar"
+            className="mt-4 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground"
+          >
+            Ver outros jogos
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
@@ -92,12 +130,14 @@ function GameDetail() {
           <section className="grid grid-cols-3 gap-2">
             <Info icon={<CalendarDays className="size-4" />} label="Data" value={game.dayLabel} />
             <Info icon={<Clock className="size-4" />} label="Hora" value={game.time} />
-            <Info
-              icon={<Star className="size-4" />}
-              label="Preço"
-              value={formatPrice(game.price)}
-            />
+            <Info icon={<Tag className="size-4" />} label="Preço" value={formatPrice(game.price)} />
           </section>
+
+          {game.price > 0 && (
+            <p className="rounded-2xl bg-glass px-4 py-3 text-xs text-muted-foreground ring-1 ring-border">
+              O pagamento é feito diretamente ao organizador, no local.
+            </p>
+          )}
 
           <section className="flex items-start gap-3 rounded-2xl bg-glass p-4 ring-1 ring-border backdrop-blur-md">
             <MapPin className="mt-0.5 size-4 text-primary" />
@@ -117,20 +157,25 @@ function GameDetail() {
             <ul className="mt-3 space-y-2">
               {game.players.map((pl) => (
                 <li key={pl.id} className="flex items-center gap-3">
-                  <span className="grid size-8 place-items-center rounded-full bg-tint font-display text-[11px] font-bold ring-1 ring-border">
+                  <span
+                    className={`grid size-8 place-items-center rounded-full font-display text-[11px] font-bold ${
+                      pl.id === user?.id
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-tint ring-1 ring-border"
+                    }`}
+                  >
                     {pl.initials}
                   </span>
-                  <span className="text-sm">{pl.name}</span>
+                  <span className={`text-sm ${pl.id === user?.id ? "font-semibold text-primary" : ""}`}>
+                    {pl.id === user?.id ? "Tu" : pl.name}
+                    {pl.id === game.organizer.id && (
+                      <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        organizador
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
-              {joined && (
-                <li className="flex items-center gap-3">
-                  <span className="grid size-8 place-items-center rounded-full bg-primary font-display text-[11px] font-bold text-primary-foreground">
-                    TU
-                  </span>
-                  <span className="text-sm font-semibold text-primary">Tu (inscrito)</span>
-                </li>
-              )}
             </ul>
           </section>
 
@@ -146,28 +191,97 @@ function GameDetail() {
                 <p className="text-sm font-semibold">{game.organizer.name}</p>
               </div>
             </div>
-            <span className="font-mono text-xs text-muted-foreground">
-              ★ {game.organizer.rating} · {game.organizer.games} jogos
-            </span>
+            {organizerGames !== undefined && (
+              <span className="font-mono text-xs text-muted-foreground">
+                {organizerGames} {organizerGames === 1 ? "jogo" : "jogos"}
+              </span>
+            )}
           </section>
+
+          {isOrganizer && (
+            <button
+              onClick={() => {
+                if (confirm("Cancelar este jogo? Os jogadores inscritos perdem a vaga.")) {
+                  removal.mutate();
+                }
+              }}
+              disabled={removal.isPending}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-destructive/10 py-3 text-sm font-semibold text-destructive ring-1 ring-destructive/30 disabled:opacity-60"
+            >
+              <Trash2 className="size-4" />
+              Cancelar jogo
+            </button>
+          )}
         </main>
 
         <div className="fixed inset-x-0 bottom-[68px] z-30 mx-auto max-w-md px-5">
-          <button
-            onClick={() => setJoined((v) => !v)}
-            className={`w-full rounded-full py-3.5 font-display text-[15px] font-bold tracking-tight transition-transform duration-150 active:scale-[0.96] ${
-              joined
-                ? "bg-glass-strong text-foreground ring-1 ring-border backdrop-blur-lg"
-                : "bg-primary text-primary-foreground"
-            }`}
-          >
-            {joined ? "Inscrito · anular" : "Juntar-me"}
-          </button>
+          <JoinButton
+            isPast={isPast}
+            full={free <= 0 && !joined}
+            joined={joined}
+            isOrganizer={isOrganizer}
+            pending={membership.isPending}
+            loggedIn={Boolean(user)}
+            onJoin={() => membership.mutate()}
+            onLogin={() => navigate({ to: "/entrar", search: { redirect: `/jogo/${id}` } })}
+          />
         </div>
 
         <BottomNav />
       </div>
     </div>
+  );
+}
+
+function JoinButton({
+  isPast,
+  full,
+  joined,
+  isOrganizer,
+  pending,
+  loggedIn,
+  onJoin,
+  onLogin,
+}: {
+  isPast: boolean;
+  full: boolean;
+  joined: boolean;
+  isOrganizer: boolean;
+  pending: boolean;
+  loggedIn: boolean;
+  onJoin: () => void;
+  onLogin: () => void;
+}) {
+  const base =
+    "flex w-full items-center justify-center gap-2 rounded-full py-3.5 font-display text-[15px] font-bold tracking-tight transition-transform duration-150 active:scale-[0.96] disabled:active:scale-100";
+  const muted = "bg-glass-strong text-muted-foreground ring-1 ring-border backdrop-blur-lg";
+
+  if (isPast) return <div className={`${base} ${muted}`}>Este jogo já aconteceu</div>;
+  if (isOrganizer) return <div className={`${base} ${muted}`}>És o organizador deste jogo</div>;
+
+  if (!loggedIn) {
+    return (
+      <button onClick={onLogin} className={`${base} bg-primary text-primary-foreground`}>
+        Entrar para me juntar
+      </button>
+    );
+  }
+
+  if (full) return <div className={`${base} ${muted}`}>Jogo cheio</div>;
+
+  return (
+    <button
+      onClick={onJoin}
+      disabled={pending}
+      className={`${base} ${
+        joined
+          ? "bg-glass-strong text-foreground ring-1 ring-border backdrop-blur-lg"
+          : "bg-primary text-primary-foreground"
+      } disabled:opacity-70`}
+    >
+      {pending && <Loader2 className="size-4 animate-spin" />}
+      {joined ? "Inscrito · sair" : "Juntar-me"}
+    </button>
   );
 }
 

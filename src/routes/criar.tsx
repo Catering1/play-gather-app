@@ -1,9 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import { RequireAuth } from "@/components/RequireAuth";
 import { Field, inputClass } from "@/components/Field";
-import { SPORTS, LEVELS, CITIES } from "@/data/games";
+import { SPORTS, LEVELS, CITIES, DEFAULT_CITY, type Level, type Sport } from "@/data/games";
+import { createGame } from "@/lib/queries";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/criar")({
   head: () => ({
@@ -14,32 +19,68 @@ export const Route = createFileRoute("/criar")({
         content: "Organiza um jogo em segundos: desporto, data, local, jogadores, nível e preço.",
       },
       { property: "og:title", content: "Criar jogo — MatchFind" },
-      {
-        property: "og:description",
-        content: "Organiza um jogo em segundos e enche a tua equipa.",
-      },
+      { property: "og:description", content: "Organiza um jogo em segundos e enche a tua equipa." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: Criar,
+  component: () => (
+    <RequireAuth>
+      <Criar />
+    </RequireAuth>
+  ),
 });
 
+function tomorrow() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function Criar() {
-  const [done, setDone] = useState(false);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { user, profile } = useAuth();
+
   const [form, setForm] = useState({
-    sport: "Futebol",
-    date: "2026-09-12",
+    title: "",
+    sport: "Futebol" as Sport,
+    date: tomorrow(),
     time: "19:00",
     venue: "",
-    city: "Lisboa",
+    city: profile?.city ?? DEFAULT_CITY,
     players: 10,
-    level: "Todos os níveis",
+    level: "Todos os níveis" as Level,
     price: 8,
   });
 
-  const set = (k: keyof typeof form, v: string | number) =>
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  const create = useMutation({
+    mutationFn: () =>
+      createGame(
+        {
+          title: form.title,
+          sport: form.sport,
+          date: form.date,
+          time: form.time,
+          venue: form.venue,
+          city: form.city,
+          slots: form.players,
+          level: form.level,
+          price: form.price,
+        },
+        user!.id,
+      ),
+    onSuccess: (id) => {
+      toast.success("Jogo publicado!");
+      queryClient.invalidateQueries({ queryKey: ["games"] });
+      queryClient.invalidateQueries({ queryKey: ["my-games"] });
+      navigate({ to: "/jogo/$id", params: { id } });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   return (
     <AppShell>
@@ -47,141 +88,149 @@ function Criar() {
         <header>
           <h1 className="font-display text-3xl font-extrabold tracking-tight">Criar jogo</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Preenche os detalhes e publica — os jogadores aparecem sozinhos.
+            Preenche os detalhes e publica — ficas automaticamente inscrito.
           </p>
         </header>
 
-        {done ? (
-          <div className="rounded-3xl bg-glass-strong p-6 text-center ring-1 ring-border backdrop-blur-lg">
-            <span className="mx-auto grid size-12 place-items-center rounded-full bg-primary text-primary-foreground">
-              <Check className="size-6" />
-            </span>
-            <h2 className="mt-4 font-display text-xl font-bold tracking-tight">Jogo publicado</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {form.sport} · {form.date} às {form.time} · {form.venue || "local por definir"},{" "}
-              {form.city}
-            </p>
-            <button
-              onClick={() => setDone(false)}
-              className="mt-5 rounded-full bg-glass px-5 py-2.5 text-sm font-semibold ring-1 ring-border"
-            >
-              Editar detalhes
-            </button>
-          </div>
-        ) : (
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setDone(true);
-            }}
-          >
-            <Field label="Desporto">
-              <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
-                {SPORTS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => set("sport", s)}
-                    className={`shrink-0 rounded-full px-4 py-2 text-sm transition-transform duration-150 active:scale-[0.94] ${
-                      form.sport === s
-                        ? "bg-primary font-semibold text-primary-foreground"
-                        : "bg-glass font-medium ring-1 ring-border backdrop-blur-md"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </Field>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            create.mutate();
+          }}
+        >
+          <Field label="Nome do jogo">
+            <input
+              value={form.title}
+              onChange={(e) => set("title", e.target.value)}
+              required
+              minLength={3}
+              maxLength={80}
+              placeholder="Ex: Futsal 5×5 de quinta"
+              className={inputClass}
+            />
+          </Field>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Data">
-                <input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => set("date", e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label="Hora">
-                <input
-                  type="time"
-                  value={form.time}
-                  onChange={(e) => set("time", e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
+          <Field label="Desporto">
+            <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+              {SPORTS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => set("sport", s)}
+                  className={`shrink-0 rounded-full px-4 py-2 text-sm transition-transform duration-150 active:scale-[0.94] ${
+                    form.sport === s
+                      ? "bg-primary font-semibold text-primary-foreground"
+                      : "bg-glass font-medium ring-1 ring-border backdrop-blur-md"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
             </div>
+          </Field>
 
-            <Field label="Local">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Data">
               <input
-                value={form.venue}
-                onChange={(e) => set("venue", e.target.value)}
-                placeholder="Ex: Campo da Tapada"
+                type="date"
+                value={form.date}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => set("date", e.target.value)}
+                required
                 className={inputClass}
               />
             </Field>
-
-            <Field label="Cidade">
-              <select
-                value={form.city}
-                onChange={(e) => set("city", e.target.value)}
+            <Field label="Hora">
+              <input
+                type="time"
+                value={form.time}
+                onChange={(e) => set("time", e.target.value)}
+                required
                 className={inputClass}
-              >
-                {CITIES.map((c) => (
-                  <option key={c} className="bg-background">
-                    {c}
-                  </option>
-                ))}
-              </select>
+              />
             </Field>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Jogadores">
-                <input
-                  type="number"
-                  min={2}
-                  max={22}
-                  value={form.players}
-                  onChange={(e) => set("players", Number(e.target.value))}
-                  className={inputClass}
-                />
-              </Field>
-              <Field label="Preço por pessoa (€)">
-                <input
-                  type="number"
-                  min={0}
-                  max={50}
-                  value={form.price}
-                  onChange={(e) => set("price", Number(e.target.value))}
-                  className={inputClass}
-                />
-              </Field>
-            </div>
+          <Field label="Local">
+            <input
+              value={form.venue}
+              onChange={(e) => set("venue", e.target.value)}
+              required
+              minLength={2}
+              maxLength={120}
+              placeholder="Ex: Campo da Tapada"
+              className={inputClass}
+            />
+          </Field>
 
-            <Field label="Nível">
-              <select
-                value={form.level}
-                onChange={(e) => set("level", e.target.value)}
-                className={inputClass}
-              >
-                {LEVELS.map((l) => (
-                  <option key={l} className="bg-background">
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <button
-              type="submit"
-              className="w-full rounded-full bg-primary py-3.5 font-display text-[15px] font-bold tracking-tight text-primary-foreground transition-transform duration-150 active:scale-[0.96]"
+          <Field label="Cidade">
+            <select
+              value={form.city}
+              onChange={(e) => set("city", e.target.value)}
+              className={inputClass}
             >
-              Publicar jogo
-            </button>
-          </form>
-        )}
+              {CITIES.map((c) => (
+                <option key={c} className="bg-background">
+                  {c}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Jogadores">
+              <input
+                type="number"
+                min={2}
+                max={40}
+                value={form.players}
+                onChange={(e) => set("players", Number(e.target.value))}
+                required
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Preço por pessoa (€)">
+              <input
+                type="number"
+                min={0}
+                max={200}
+                step="0.5"
+                value={form.price}
+                onChange={(e) => set("price", Number(e.target.value))}
+                required
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          <Field label="Nível">
+            <select
+              value={form.level}
+              onChange={(e) => set("level", e.target.value as Level)}
+              className={inputClass}
+            >
+              {LEVELS.map((l) => (
+                <option key={l} className="bg-background">
+                  {l}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <p className="text-xs text-muted-foreground">
+            O dinheiro é entregue a ti no local — a app não trata de pagamentos.
+          </p>
+
+          <button
+            type="submit"
+            disabled={create.isPending}
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-primary py-3.5 font-display text-[15px] font-bold tracking-tight text-primary-foreground transition-transform duration-150 active:scale-[0.96] disabled:opacity-60"
+          >
+            {create.isPending && <Loader2 className="size-4 animate-spin" />}
+            Publicar jogo
+          </button>
+        </form>
       </main>
     </AppShell>
   );

@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import { type Game, formatPrice } from "@/data/games";
+import { formatPrice } from "@/data/games";
+import type { Game } from "@/lib/queries";
 
 export function GameCard({ game, delay = 0 }: { game: Game; delay?: number }) {
-  const free = game.slots - game.players.length;
+  const free = game.slots - game.taken;
 
   return (
     <Link

@@ -1,9 +1,13 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Search } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Loader2, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { GameCard } from "@/components/GameCard";
-import { GAMES, SPORTS, CITIES, type Sport } from "@/data/games";
+import { SPORTS, CITIES, DEFAULT_CITY, type Sport } from "@/data/games";
+import { listGames } from "@/lib/queries";
+import { useAuth } from "@/lib/auth";
+import { todayLabel } from "@/lib/format";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -32,21 +36,30 @@ const STEPS = [
   { n: "03", strong: "Apita-se o início", rest: ", entras em campo e jogas." },
 ];
 
+const WHENS = ["Todos", "Hoje", "Amanhã", "Esta semana"] as const;
+
 function Home() {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [sport, setSport] = useState<Sport | "Todas">("Todas");
-  const [city, setCity] = useState("Lisboa");
-  const [day, setDay] = useState("Hoje");
+  const [city, setCity] = useState(profile?.city ?? DEFAULT_CITY);
+  const [when, setWhen] = useState<(typeof WHENS)[number]>("Todos");
   const [query, setQuery] = useState("");
 
-  const recommended = GAMES.filter((g) => sport === "Todas" || g.sport === sport).slice(0, 3);
+  const { data: games = [], isLoading } = useQuery({
+    queryKey: ["games", "home", city],
+    queryFn: () => listGames({ city, limit: 50 }),
+  });
+
+  const recommended = games.filter((g) => sport === "Todas" || g.sport === sport).slice(0, 3);
 
   return (
     <AppShell>
       <main className="space-y-9 px-5 pb-28 pt-6">
         <section style={{ animation: "mf-rise 600ms var(--ease-tap) both" }}>
           <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-            sábado · {GAMES.length} jogos em {city}
+            {todayLabel()} · {isLoading ? "…" : games.length}{" "}
+            {games.length === 1 ? "jogo" : "jogos"} em {city}
           </p>
           <h1 className="mt-3 text-balance font-display text-[40px] font-extrabold leading-[0.95] tracking-tight">
             Encontra o teu próximo jogo.
@@ -59,7 +72,13 @@ function Home() {
             className="mt-5 space-y-2.5"
             onSubmit={(e) => {
               e.preventDefault();
-              navigate({ to: "/explorar" });
+              const search: { q?: string; city: string; when: typeof when; sport?: Sport } = {
+                city,
+                when,
+              };
+              if (query.trim()) search.q = query.trim();
+              if (sport !== "Todas") search.sport = sport;
+              navigate({ to: "/explorar", search });
             }}
           >
             <div className="flex items-center gap-2.5 rounded-full bg-glass px-4 py-3 ring-1 ring-border backdrop-blur-md">
@@ -84,17 +103,23 @@ function Home() {
                 ))}
               </select>
               <select
-                value={day}
-                onChange={(e) => setDay(e.target.value)}
+                value={when}
+                onChange={(e) => setWhen(e.target.value as (typeof WHENS)[number])}
                 className="rounded-2xl bg-glass px-4 py-3 text-sm ring-1 ring-border backdrop-blur-md outline-none"
               >
-                {["Hoje", "Amanhã", "Este fim de semana", "Esta semana"].map((d) => (
+                {WHENS.map((d) => (
                   <option key={d} className="bg-background">
                     {d}
                   </option>
                 ))}
               </select>
             </div>
+            <button
+              type="submit"
+              className="w-full rounded-full bg-primary py-3 font-display text-sm font-bold tracking-tight text-primary-foreground transition-transform duration-150 active:scale-[0.97]"
+            >
+              Procurar jogos
+            </button>
           </form>
         </section>
 
@@ -127,13 +152,24 @@ function Home() {
             </Link>
           </div>
           <div className="space-y-3">
-            {recommended.map((g, i) => (
-              <GameCard key={g.id} game={g} delay={i * 70} />
-            ))}
-            {recommended.length === 0 && (
-              <p className="rounded-2xl bg-glass p-4 text-sm text-muted-foreground ring-1 ring-border">
-                Ainda não há jogos desta modalidade por aqui.
-              </p>
+            {isLoading && (
+              <div className="grid place-items-center rounded-2xl bg-glass p-8 ring-1 ring-border">
+                <Loader2 className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {!isLoading && recommended.map((g, i) => <GameCard key={g.id} game={g} delay={i * 70} />)}
+            {!isLoading && recommended.length === 0 && (
+              <div className="rounded-2xl bg-glass p-5 text-center ring-1 ring-border">
+                <p className="text-sm text-muted-foreground">
+                  Ainda não há jogos {sport === "Todas" ? "" : `de ${sport} `}em {city}.
+                </p>
+                <Link
+                  to="/criar"
+                  className="mt-3 inline-block rounded-full bg-primary px-5 py-2.5 font-display text-sm font-bold text-primary-foreground"
+                >
+                  Sê o primeiro a criar um
+                </Link>
+              </div>
             )}
           </div>
         </section>

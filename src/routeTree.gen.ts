@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CriarRouteImport } from './routes/criar'
+import { Route as EntrarRouteImport } from './routes/entrar'
 import { Route as ExplorarRouteImport } from './routes/explorar'
+import { Route as JogosRouteImport } from './routes/jogos'
 import { Route as PerfilRouteImport } from './routes/perfil'
 import { Route as JogoIdRouteImport } from './routes/jogo.$id'
 
@@ -25,9 +27,19 @@ const CriarRoute = CriarRouteImport.update({
   path: '/criar',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EntrarRoute = EntrarRouteImport.update({
+  id: '/entrar',
+  path: '/entrar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExplorarRoute = ExplorarRouteImport.update({
   id: '/explorar',
   path: '/explorar',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JogosRoute = JogosRouteImport.update({
+  id: '/jogos',
+  path: '/jogos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PerfilRoute = PerfilRouteImport.update({
@@ -44,14 +56,18 @@ const JogoIdRoute = JogoIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/criar': typeof CriarRoute
+  '/entrar': typeof EntrarRoute
   '/explorar': typeof ExplorarRoute
+  '/jogos': typeof JogosRoute
   '/perfil': typeof PerfilRoute
   '/jogo/$id': typeof JogoIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/criar': typeof CriarRoute
+  '/entrar': typeof EntrarRoute
   '/explorar': typeof ExplorarRoute
+  '/jogos': typeof JogosRoute
   '/perfil': typeof PerfilRoute
   '/jogo/$id': typeof JogoIdRoute
 }
@@ -59,22 +75,48 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/criar': typeof CriarRoute
+  '/entrar': typeof EntrarRoute
   '/explorar': typeof ExplorarRoute
+  '/jogos': typeof JogosRoute
   '/perfil': typeof PerfilRoute
   '/jogo/$id': typeof JogoIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/criar' | '/explorar' | '/perfil' | '/jogo/$id'
+  fullPaths:
+    | '/'
+    | '/criar'
+    | '/entrar'
+    | '/explorar'
+    | '/jogos'
+    | '/perfil'
+    | '/jogo/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/criar' | '/explorar' | '/perfil' | '/jogo/$id'
-  id: '__root__' | '/' | '/criar' | '/explorar' | '/perfil' | '/jogo/$id'
+  to:
+    | '/'
+    | '/criar'
+    | '/entrar'
+    | '/explorar'
+    | '/jogos'
+    | '/perfil'
+    | '/jogo/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/criar'
+    | '/entrar'
+    | '/explorar'
+    | '/jogos'
+    | '/perfil'
+    | '/jogo/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CriarRoute: typeof CriarRoute
+  EntrarRoute: typeof EntrarRoute
   ExplorarRoute: typeof ExplorarRoute
+  JogosRoute: typeof JogosRoute
   PerfilRoute: typeof PerfilRoute
   JogoIdRoute: typeof JogoIdRoute
 }
@@ -95,11 +137,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CriarRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/entrar': {
+      id: '/entrar'
+      path: '/entrar'
+      fullPath: '/entrar'
+      preLoaderRoute: typeof EntrarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/explorar': {
       id: '/explorar'
       path: '/explorar'
       fullPath: '/explorar'
       preLoaderRoute: typeof ExplorarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/jogos': {
+      id: '/jogos'
+      path: '/jogos'
+      fullPath: '/jogos'
+      preLoaderRoute: typeof JogosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/perfil': {
@@ -122,7 +178,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CriarRoute: CriarRoute,
+  EntrarRoute: EntrarRoute,
   ExplorarRoute: ExplorarRoute,
+  JogosRoute: JogosRoute,
   PerfilRoute: PerfilRoute,
   JogoIdRoute: JogoIdRoute,
 }
