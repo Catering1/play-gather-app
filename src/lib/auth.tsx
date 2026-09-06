@@ -122,6 +122,16 @@ export async function signIn(email: string, password: string) {
   if (error) throw new Error(translateAuthError(error.message));
 }
 
+export async function signInWithGoogle() {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${window.location.origin}/`,
+    },
+  });
+  if (error) throw new Error(translateAuthError(error.message));
+}
+
 function translateAuthError(message: string) {
   const m = message.toLowerCase();
   if (m.includes("invalid login credentials")) return "Email ou palavra-passe errados.";
