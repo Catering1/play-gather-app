@@ -1,11 +1,25 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Search } from "lucide-react";
+import { List, Loader2, MapPin, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { GameCard } from "@/components/GameCard";
+import { ClientOnly } from "@/components/ClientOnly";
 import { SPORTS, LEVELS, CITIES, type Sport, type Level } from "@/data/games";
 import { listGames } from "@/lib/queries";
+
+// Import dinâmico: o Leaflet acede a `window` assim que é carregado, o que
+// rebenta na renderização no servidor. Isto isola-o num chunk à parte que só
+// é pedido no browser, quando o utilizador muda para o modo mapa.
+const MapView = lazy(() => import("@/components/MapView").then((m) => ({ default: m.MapView })));
+
+function MapFallback() {
+  return (
+    <div className="grid h-[60vh] place-items-center rounded-3xl bg-glass ring-1 ring-border">
+      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 const WHENS = ["Todos", "Hoje", "Amanhã", "Esta semana"] as const;
 type When = (typeof WHENS)[number];
@@ -59,6 +73,7 @@ function Explorar() {
 
   const maxPrice = search.maxPrice ?? 50;
   const [term, setTerm] = useState(search.q ?? "");
+  const [view, setView] = useState<"list" | "map">("list");
 
   // Um valor undefined no patch significa "tirar este filtro" — as chaves
   // vazias são removidas para não ficarem no endereço da página.
@@ -207,32 +222,71 @@ function Explorar() {
           />
         </div>
 
-        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          {isLoading ? "a procurar…" : `${results.length} ${results.length === 1 ? "jogo" : "jogos"}`}
-        </p>
-
-        <div className="space-y-3">
-          {isLoading && (
-            <div className="grid place-items-center rounded-2xl bg-glass p-8 ring-1 ring-border">
-              <Loader2 className="size-5 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {!isLoading && results.map((g, i) => <GameCard key={g.id} game={g} delay={i * 60} />)}
-          {!isLoading && results.length === 0 && (
-            <div className="rounded-3xl bg-glass p-6 text-center ring-1 ring-border backdrop-blur-md">
-              <p className="font-display text-base font-bold">Sem jogos com estes filtros</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Alarga a data, o nível ou o preço para veres mais opções.
-              </p>
-              <Link
-                to="/criar"
-                className="mt-4 inline-block rounded-full bg-primary px-5 py-2.5 font-display text-sm font-bold text-primary-foreground"
-              >
-                Criar um jogo
-              </Link>
-            </div>
-          )}
+        <div className="flex items-center justify-between">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            {isLoading
+              ? "a procurar…"
+              : `${results.length} ${results.length === 1 ? "jogo" : "jogos"}`}
+          </p>
+          <div className="flex gap-1 rounded-full bg-glass p-1 ring-1 ring-border backdrop-blur-md">
+            <button
+              type="button"
+              onClick={() => setView("list")}
+              aria-pressed={view === "list"}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-transform duration-150 active:scale-[0.94] ${
+                view === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <List className="size-3.5" /> Lista
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("map")}
+              aria-pressed={view === "map"}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-transform duration-150 active:scale-[0.94] ${
+                view === "map" ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+              }`}
+            >
+              <MapPin className="size-3.5" /> Mapa
+            </button>
+          </div>
         </div>
+
+        {isLoading && (
+          <div className="grid place-items-center rounded-2xl bg-glass p-8 ring-1 ring-border">
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        )}
+
+        {!isLoading && view === "map" && (
+          <ClientOnly fallback={<MapFallback />}>
+            <Suspense fallback={<MapFallback />}>
+              <MapView games={results} city={search.city} />
+            </Suspense>
+          </ClientOnly>
+        )}
+
+        {!isLoading && view === "list" && (
+          <div className="space-y-3">
+            {results.map((g, i) => (
+              <GameCard key={g.id} game={g} delay={i * 60} />
+            ))}
+            {results.length === 0 && (
+              <div className="rounded-3xl bg-glass p-6 text-center ring-1 ring-border backdrop-blur-md">
+                <p className="font-display text-base font-bold">Sem jogos com estes filtros</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Alarga a data, o nível ou o preço para veres mais opções.
+                </p>
+                <Link
+                  to="/criar"
+                  className="mt-4 inline-block rounded-full bg-primary px-5 py-2.5 font-display text-sm font-bold text-primary-foreground"
+                >
+                  Criar um jogo
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </AppShell>
   );

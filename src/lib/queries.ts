@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { SPORT_IMAGE, type Level, type Sport } from "@/data/games";
 import { dayLabel, initialsOf, timeLabel } from "./format";
+import { geocodeVenue } from "./geocode";
 
 export type Person = { id: string; name: string; initials: string };
 
@@ -19,16 +20,18 @@ export type Game = {
   taken: number;
   image: string;
   organizer: Person;
+  lat: number | null;
+  lng: number | null;
 };
 
 export type GameDetail = Game & { players: Person[] };
 
 const LIST_SELECT =
-  "id, title, sport, starts_at, venue, city, price_cents, level, slots," +
+  "id, title, sport, starts_at, venue, city, price_cents, level, slots, lat, lng," +
   " organizer:profiles!games_organizer_id_fkey (id, name), game_players (player_id)";
 
 const DETAIL_SELECT =
-  "id, title, sport, starts_at, venue, city, price_cents, level, slots," +
+  "id, title, sport, starts_at, venue, city, price_cents, level, slots, lat, lng," +
   " organizer:profiles!games_organizer_id_fkey (id, name)," +
   " game_players (player_id, player:profiles!game_players_player_id_fkey (id, name))";
 
@@ -42,6 +45,8 @@ type Row = {
   price_cents: number;
   level: Level;
   slots: number;
+  lat: number | null;
+  lng: number | null;
   organizer: { id: string; name: string } | null;
   game_players: { player_id: string; player?: { id: string; name: string } | null }[];
 };
@@ -67,12 +72,17 @@ function toGame(row: Row): Game {
     taken: row.game_players.length,
     image: SPORT_IMAGE[row.sport],
     organizer: person(row.organizer ?? { id: "", name: "Desconhecido" }),
+    lat: row.lat,
+    lng: row.lng,
   };
 }
 
 /** PostgREST usa vírgulas e parênteses como sintaxe: retiram-se do texto pesquisado. */
 function safeSearch(term: string) {
-  return term.replace(/[,()%\\*]/g, " ").trim().slice(0, 60);
+  return term
+    .replace(/[,()%\\*]/g, " ")
+    .trim()
+    .slice(0, 60);
 }
 
 export type GameFilters = {
@@ -180,6 +190,9 @@ export async function createGame(input: NewGame, organizerId: string) {
   if (Number.isNaN(startsAt.getTime())) throw new Error("Data ou hora inválida.");
   if (startsAt.getTime() < Date.now()) throw new Error("Essa data já passou.");
 
+  const venue = input.venue.trim();
+  const { lat, lng } = await geocodeVenue(venue, input.city);
+
   const { data, error } = await supabase
     .from("games")
     .insert({
@@ -187,11 +200,13 @@ export async function createGame(input: NewGame, organizerId: string) {
       title: input.title.trim(),
       sport: input.sport,
       starts_at: startsAt.toISOString(),
-      venue: input.venue.trim(),
+      venue,
       city: input.city,
       price_cents: Math.round(input.price * 100),
       level: input.level,
       slots: input.slots,
+      lat,
+      lng,
     })
     .select("id")
     .single();
